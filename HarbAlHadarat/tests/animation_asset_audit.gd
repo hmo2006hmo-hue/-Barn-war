@@ -4,16 +4,16 @@ const Catalog = preload("res://scripts/catalog.gd")
 const DETAIL_FILES := [
     "Great Sword Attack.fbx",
     "Great Sword Slash.fbx",
-    "Great Sword Slash (1).fbx",
+    "Great Sword Run.fbx",
     "great sword idle.fbx",
     "great sword walk.fbx",
-    "great sword run (2).fbx",
-    "great sword slash (3).fbx",
+    "Sword And Shield Attack.fbx",
+    "sword and shield block.fbx",
     "sword and shield idle.fbx",
     "sword and shield walk.fbx",
-    "ssword and shield run.fbx",
-    "sword and shield attack (3).fbx",
-    "sword and shield death.fbx"
+    "sword and shield death.fbx",
+    "Great Sword Slide Attack.fbx",
+    "Standing Run Forward.fbx"
 ]
 
 func _initialize() -> void:
@@ -70,9 +70,9 @@ func _run() -> void:
         instance.queue_free()
         await process_frame
 
-    var dir := DirAccess.open("res://assets/_fbx_audit")
+    var dir := DirAccess.open("res://assets/animations")
     if dir == null:
-        push_error("ANIMATION_AUDIT_FAIL: staging folder res://assets/_fbx_audit does not exist")
+        push_error("ANIMATION_AUDIT_FAIL: asset folder res://assets/animations does not exist")
         quit(1)
         return
 
@@ -95,7 +95,7 @@ func _run() -> void:
     var bone_histogram: Dictionary = {}
     print("ANIMATION_AUDIT_SOURCE_COUNT: ", filenames.size(), " FBX files staged")
     for name in filenames:
-        var path := "res://assets/_fbx_audit/" + name
+        var path := "res://assets/animations/" + name
         var packed := ResourceLoader.load(path) as PackedScene
         if packed == null:
             failed.append(name)
