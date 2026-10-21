@@ -1,12 +1,9 @@
 
 extends SkeletonModifier3D
 
-# Explicit bone links:
-# [target_name, FBX_name, FBX_index, GLB_index, GLB_parent_index, FBX_parent_index]
-# FBX: 65 bones
-# GLB: 40 bones
-# FBX Spine1 (index 2) is not mapped directly. Its animated rotation is
-# preserved through the global rest-relative rotation transfer.
+# Retarget Mixamo's 65-bone animation source onto Oran's 23-bone GLB rig.
+# Only bones present in both hierarchies are mapped; Oran's separate Root is
+# kept at rest. Spine1 is mapped directly rather than being discarded.
 
 const BONE_LINKS := [
 	# Oran uses a 23-bone Mixamo body rig (including a separate Root).
