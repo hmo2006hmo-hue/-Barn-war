@@ -143,11 +143,11 @@ func _run() -> void:
         _fail("actual target local rotations diverge from explicit rest-relative global mapping")
         return
     if spine1_delta < 0.01:
-        _fail("chosen test time did not exercise the unmapped source Spine1 bone")
+        _fail("source Spine1 did not move at the inspected frame")
         return
     if chest_delta < 0.01:
         _fail("source animation did not transfer a rotation to Oran's Spine2/chest")
         return
 
-    print("RETARGET_EXPLICIT_PASS: exact bone indices and parent hierarchies validated; unmapped Spine1 motion contributes without stretching GLB bones.")
+    print("RETARGET_EXPLICIT_PASS: exact bone indices and parent hierarchies validated; Spine1 motion reaches Oran without stretching its bones.")
     quit(0)
