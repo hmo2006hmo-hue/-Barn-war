@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Runtime FBX retargeting for the shared 65-bone Mixamo sources and 40-bone GLB characters.
+# Runtime FBX retargeting from 65-bone Mixamo sources to Oran's 23-bone GLB rig.
 # Procedural poses remain as a safe fallback if a configured source cannot load.
 
 var pivot: Node3D
