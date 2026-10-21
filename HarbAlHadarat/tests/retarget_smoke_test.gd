@@ -22,21 +22,21 @@ func _fail(message: String) -> void:
     quit(1)
 
 func _expected_local_rotations(source: Skeleton3D, target: Skeleton3D) -> Dictionary:
-    var expected_global: Dictionary = {0: target.get_bone_global_rest(0).basis.orthonormalized()}
     var expected_local: Dictionary = {}
     for row in ExplicitRetargetModifier.BONE_LINKS:
         var source_index := int(row[2])
         var target_index := int(row[3])
-        var target_parent_index := int(row[4])
-        var source_pose_global: Transform3D = source.get_bone_global_pose(source_index)
-        var source_rest_global: Transform3D = source.get_bone_global_rest(source_index)
-        var target_rest_global: Transform3D = target.get_bone_global_rest(target_index)
-        var source_delta: Basis = source_pose_global.basis.orthonormalized() * source_rest_global.basis.orthonormalized().inverse()
-        var desired_global: Basis = (source_delta * target_rest_global.basis.orthonormalized()).orthonormalized()
-        var parent_global: Basis = expected_global.get(target_parent_index, target.get_bone_global_rest(target_parent_index).basis.orthonormalized())
-        var desired_local: Basis = (parent_global.inverse() * desired_global).orthonormalized()
-        expected_local[target_index] = desired_local.get_rotation_quaternion()
-        expected_global[target_index] = desired_global
+        var source_pose_local: Transform3D = source.get_bone_pose(source_index)
+        var source_rest_local: Transform3D = source.get_bone_rest(source_index)
+        var target_rest_local: Transform3D = target.get_bone_rest(target_index)
+        var source_delta: Basis = (
+            source_rest_local.basis.orthonormalized().inverse()
+            * source_pose_local.basis.orthonormalized()
+        ).orthonormalized()
+        var expected_local_basis: Basis = (
+            target_rest_local.basis.orthonormalized() * source_delta
+        ).orthonormalized()
+        expected_local[target_index] = expected_local_basis.get_rotation_quaternion()
     return expected_local
 
 func _run() -> void:
@@ -140,7 +140,7 @@ func _run() -> void:
         _fail("target GLB bone positions changed; body proportions must remain target-local")
         return
     if max_rotation_error > ANGLE_TOLERANCE:
-        _fail("actual target local rotations diverge from explicit rest-relative global mapping")
+        _fail("actual target local rotations diverge from rest-relative local mapping")
         return
     if spine1_delta < 0.01:
         _fail("source Spine1 did not move at the inspected frame")
