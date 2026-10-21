@@ -94,6 +94,11 @@ var attack_t: float = 0.0
 var attack_done: bool = true
 var invuln: float = 0.0
 var running: bool = false
+var blocking: bool = false
+var dodge_t: float = 0.0
+var dash_t: float = 0.0
+var dodge_direction: Vector3 = Vector3.ZERO
+var dash_direction: Vector3 = Vector3.ZERO
 
 var camera: Camera3D
 var camera_yaw: float = 0.0
@@ -154,6 +159,7 @@ var distance_label: Label
 var compass: Control
 var message_label: Label
 var run_pad: Panel
+var block_pad: Panel
 var shard_pad: Panel
 var vignette: ColorRect
 var flash_rect: ColorRect
@@ -769,7 +775,7 @@ func _update_projectiles(delta: float) -> void:
 # --------------------------------------------------
 
 func _player_attack() -> void:
-    if state != State.PLAYING or attack_t > 0.0:
+    if state != State.PLAYING or attack_t > 0.0 or blocking or dodge_t > 0.0 or dash_t > 0.0:
         return
     attack_t = ATTACK_DURATION
     attack_done = false
@@ -842,14 +848,26 @@ func _kill_actor(a: Actor) -> void:
 func _damage_player(amount: float, from_pos: Vector3) -> void:
     if state != State.PLAYING or player_hp <= 0.0 or invuln > 0.0:
         return
-    player_hp = maxf(0.0, player_hp - amount)
-    invuln = 0.3
-    damage_flash = 0.55
-    shake = maxf(shake, 0.25)
+
+    var damage_taken: float = amount
+    var guarded_hit: bool = false
+    var toward_attacker: Vector3 = from_pos - player.global_position
+    toward_attacker.y = 0.0
+    var facing: Vector3 = Vector3(sin(player_yaw), 0.0, cos(player_yaw))
+    if blocking and toward_attacker.length() > 0.01:
+        guarded_hit = facing.dot(toward_attacker.normalized()) > 0.0
+        if guarded_hit:
+            damage_taken *= 0.25
+
+    player_hp = maxf(0.0, player_hp - damage_taken)
+    invuln = 0.3 if not guarded_hit else 0.12
+    damage_flash = 0.55 if not guarded_hit else 0.18
+    shake = maxf(shake, 0.25 if not guarded_hit else 0.08)
     player_rig.hit_flash()
+
     var away: Vector3 = player.global_position - from_pos
     away.y = 0.0
-    if away.length() > 0.01:
+    if away.length() > 0.01 and not guarded_hit:
         player_knock = away.normalized() * 4.0
     if player_hp <= 0.0:
         _on_player_dead()
@@ -955,6 +973,8 @@ func _update_shard(delta: float) -> void:
 func _update_player(delta: float) -> void:
     _apply_gravity(player, delta)
     invuln = maxf(0.0, invuln - delta)
+    dodge_t = maxf(0.0, dodge_t - delta)
+    dash_t = maxf(0.0, dash_t - delta)
     player_knock = player_knock * maxf(0.0, 1.0 - delta * 8.0)
 
     var input_x: float = joy_vector.x
@@ -975,6 +995,10 @@ func _update_player(delta: float) -> void:
     var direction: Vector3 = right * input_x + forward * input_forward
     if direction.length() > 1.0:
         direction = direction.normalized()
+    if dodge_t > 0.0:
+        direction = dodge_direction
+    elif dash_t > 0.0:
+        direction = dash_direction
 
     # الكاميرا تدور تدريجيًا لتبقى خلف الشخصية أثناء الحركة (إلا بعد سحب يدوي)
     cam_manual_t = maxf(0.0, cam_manual_t - delta)
@@ -984,7 +1008,13 @@ func _update_player(delta: float) -> void:
 
     var sprint: bool = running or Input.is_key_pressed(KEY_SHIFT)
     var speed: float = PLAYER_SPEED
-    if sprint:
+    if blocking:
+        speed *= 0.35
+    if dodge_t > 0.0:
+        speed = 10.0
+    elif dash_t > 0.0:
+        speed = 13.5
+    elif sprint:
         speed *= 1.6
     if attack_t > 0.0:
         speed *= 0.35
@@ -1019,17 +1049,91 @@ func _update_player(delta: float) -> void:
             attack_done = true
             _apply_player_hit()
 
-    player_rig.animate(delta, moving, sprint and moving, _attack_p(attack_t), false)
+    player_rig.animate(delta, moving, sprint and moving, _attack_p(attack_t), false, blocking, dodge_t > 0.0, dash_t > 0.0)
+
+
+func _movement_direction() -> Vector3:
+    var input_x: float = joy_vector.x
+    var input_forward: float = -joy_vector.y
+    if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+        input_x += 1.0
+    if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+        input_x -= 1.0
+    if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+        input_forward += 1.0
+    if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+        input_forward -= 1.0
+    input_x = clampf(input_x, -1.0, 1.0)
+    input_forward = clampf(input_forward, -1.0, 1.0)
+    var forward := Vector3(-sin(camera_yaw), 0.0, -cos(camera_yaw))
+    var right := Vector3(cos(camera_yaw), 0.0, -sin(camera_yaw))
+    var direction: Vector3 = right * input_x + forward * input_forward
+    if direction.length() > 1.0:
+        direction = direction.normalized()
+    return direction
 
 
 func _toggle_running() -> void:
+    if state != State.PLAYING or dodge_t > 0.0 or dash_t > 0.0:
+        return
     running = not running
+    if running and blocking:
+        blocking = false
+        _refresh_block_pad()
     _refresh_run_pad()
 
 
+func _toggle_block() -> void:
+    if state != State.PLAYING or attack_t > 0.0 or dodge_t > 0.0 or dash_t > 0.0:
+        return
+    blocking = not blocking
+    if blocking:
+        running = false
+        _refresh_run_pad()
+    _refresh_block_pad()
+
+
+func _start_dodge() -> void:
+    if state != State.PLAYING or attack_t > 0.0 or dodge_t > 0.0 or dash_t > 0.0:
+        return
+    blocking = false
+    running = false
+    dodge_direction = _movement_direction()
+    if dodge_direction.length() < 0.1:
+        dodge_direction = Vector3(-sin(camera_yaw), 0.0, -cos(camera_yaw))
+    dodge_t = 0.42
+    invuln = maxf(invuln, 0.32)
+    _refresh_run_pad()
+    _refresh_block_pad()
+
+
+func _start_dash() -> void:
+    if state != State.PLAYING or attack_t > 0.0 or dodge_t > 0.0 or dash_t > 0.0:
+        return
+    blocking = false
+    running = false
+    dash_direction = _movement_direction()
+    if dash_direction.length() < 0.1:
+        dash_direction = Vector3(-sin(camera_yaw), 0.0, -cos(camera_yaw))
+    dash_t = 0.30
+    _refresh_run_pad()
+    _refresh_block_pad()
+
+
 func _refresh_run_pad() -> void:
+    if not is_instance_valid(run_pad):
+        return
     var l: Label = run_pad.get_child(0) as Label
-    l.text = "ركض ✓" if running else "ركض"
+    if l != null:
+        l.text = "ركض ✓" if running else "ركض"
+
+
+func _refresh_block_pad() -> void:
+    if not is_instance_valid(block_pad):
+        return
+    var l: Label = block_pad.get_child(0) as Label
+    if l != null:
+        l.text = "صدّ ✓" if blocking else "صدّ"
 
 
 # --------------------------------------------------
@@ -1196,6 +1300,12 @@ func _unhandled_input(event: InputEvent) -> void:
         _player_attack()
     elif k.keycode == KEY_F:
         _use_shard()
+    elif k.keycode == KEY_G:
+        _toggle_block()
+    elif k.keycode == KEY_C:
+        _start_dodge()
+    elif k.keycode == KEY_X:
+        _start_dash()
     elif k.keycode == KEY_Q:
         camera_yaw += 0.2
     elif k.keycode == KEY_E:
@@ -1352,6 +1462,12 @@ func _build_hud() -> void:
     _place(attack_pad, false, true, 28.0, 28.0, 120.0, 120.0)
     run_pad = _make_pad("ركض", 84.0, 84.0, true, Color(0.2, 0.3, 0.45, 0.75), _toggle_running)
     _place(run_pad, false, true, 168.0, 28.0, 84.0, 84.0)
+    block_pad = _make_pad("صدّ", 76.0, 76.0, true, Color(0.15, 0.35, 0.5, 0.82), _toggle_block)
+    _place(block_pad, false, true, 264.0, 28.0, 76.0, 76.0)
+    var dodge_pad: Panel = _make_pad("تفادٍ", 76.0, 76.0, true, Color(0.2, 0.45, 0.3, 0.82), _start_dodge)
+    _place(dodge_pad, false, true, 264.0, 116.0, 76.0, 76.0)
+    var dash_pad: Panel = _make_pad("اندفاع", 76.0, 76.0, true, Color(0.62, 0.38, 0.12, 0.82), _start_dash)
+    _place(dash_pad, false, true, 168.0, 116.0, 76.0, 76.0)
     shard_pad = _make_pad("الشظية", 92.0, 92.0, true, Color(0.4, 0.22, 0.75, 0.8), _use_shard)
     _place(shard_pad, false, true, 56.0, 164.0, 92.0, 92.0)
     shard_pad.visible = false
