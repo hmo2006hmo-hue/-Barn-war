@@ -65,7 +65,7 @@ func _run() -> void:
             # Require the runtime FBX driver and every configured movement/action clip.
             if rig.retarget_modifier == null or rig.retarget_skeleton == null:
                 failures.append(label + ": FBX retarget driver was not created")
-            var required_motions := ["idle", "walk", "run", "slash", "chop", "thrust", "bow", "hit", "death"]
+            var required_motions := ["idle", "walk", "run", "slash", "chop", "thrust", "bow", "hit", "death", "block", "dodge", "dash"]
             if rig.anim_player == null:
                 failures.append(label + ": no runtime AnimationPlayer")
             else:
@@ -120,6 +120,19 @@ func _run() -> void:
             rig.animate(1.0 / 60.0, false, false, -1.0)
             if rig.anim_player != null and rig.anim_player.has_animation("motion/death") and rig.anim_player.current_animation != "motion/death":
                 failures.append(label + ": death FBX motion did not start")
+
+            rig.dead_time = -1.0
+            rig.hit_t = 0.0
+            rig.attack_style = "slash"
+            rig.animate(1.0 / 60.0, false, false, -1.0, false, true)
+            if rig.anim_player != null and rig.anim_player.has_animation("motion/block") and rig.anim_player.current_animation != "motion/block":
+                failures.append(label + ": block FBX motion did not start")
+            rig.animate(1.0 / 60.0, false, false, -1.0, false, false, true)
+            if rig.anim_player != null and rig.anim_player.has_animation("motion/dodge") and rig.anim_player.current_animation != "motion/dodge":
+                failures.append(label + ": dodge FBX motion did not start")
+            rig.animate(1.0 / 60.0, false, false, -1.0, false, false, false, true)
+            if rig.anim_player != null and rig.anim_player.has_animation("motion/dash") and rig.anim_player.current_animation != "motion/dash":
+                failures.append(label + ": dash FBX motion did not start")
 
         if rig.pivot != null and is_instance_valid(rig.pivot):
             rig.pivot.queue_free()

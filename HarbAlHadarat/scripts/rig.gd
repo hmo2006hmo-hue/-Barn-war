@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Runtime FBX retargeting for the shared 65-bone Mixamo sources and 40-bone GLB characters.
+# Runtime FBX retargeting from 65-bone Mixamo sources to Oran's 23-bone GLB rig.
 # Procedural poses remain as a safe fallback if a configured source cannot load.
 
 var pivot: Node3D
@@ -40,13 +40,16 @@ const RETARGET_MAP := ExplicitRetargetModifier.BONE_LINKS
 const MOTION_SOURCES := {
 	"idle": "great sword idle.fbx",
 	"walk": "great sword walk.fbx",
-	"run": "great sword run (2).fbx",
-	"slash": "sword and shield attack (4).fbx",
+	"run": "Great Sword Run.fbx",
+	"slash": "Great Sword Slash.fbx",
 	"chop": "Great Sword Attack.fbx",
 	"thrust": "Sword And Shield Attack.fbx",
 	"bow": "spell cast.fbx",
 	"hit": "great sword impact.fbx",
 	"death": "two handed sword death.fbx",
+	"block": "sword and shield block.fbx",
+	"dodge": "Great Sword Slide Attack.fbx",
+	"dash": "Standing Run Forward.fbx",
 }
 
 # Common aliases after normalization (lowercase, no separators or rig prefixes).
@@ -177,7 +180,7 @@ func _load_shared_motion_library() -> AnimationLibrary:
 			var track_path := String(animation.track_get_path(track_index))
 			if animation.track_get_type(track_index) == Animation.TYPE_POSITION_3D and track_path.ends_with(":mixamorig_Hips"):
 				animation.remove_track(track_index)
-		animation.loop_mode = Animation.LOOP_LINEAR if ["idle", "walk", "run"].has(motion_name) else Animation.LOOP_NONE
+		animation.loop_mode = Animation.LOOP_LINEAR if ["idle", "walk", "run", "block"].has(motion_name) else Animation.LOOP_NONE
 		var add_error: Error = library.add_animation(motion_name, animation)
 		if add_error != OK:
 			push_warning("Character rig: could not register animation " + motion_name + " from " + file_name)
@@ -221,12 +224,6 @@ func _setup_animation_driver() -> bool:
 		source_scene.queue_free()
 		source_scene = null
 		return false
-	if skeleton.get_bone_count() != 40:
-		push_warning("Character rig: unexpected GLB skeleton size; expected 40 bones, got " + str(skeleton.get_bone_count()))
-		source_scene.queue_free()
-		source_scene = null
-		return false
-
 	for row in explicit_map:
 		var target_name := String(row[0])
 		var source_name := String(row[1])
@@ -242,6 +239,11 @@ func _setup_animation_driver() -> bool:
 			return false
 		if retarget_skeleton.get_bone_parent(source_index) != source_parent_index:
 			push_warning("Character rig: FBX hierarchy mismatch for " + source_name + ".")
+			source_scene.queue_free()
+			source_scene = null
+			return false
+		if target_index < 0 or target_index >= skeleton.get_bone_count():
+			push_warning("Character rig: GLB index out of range for " + target_name + ".")
 			source_scene.queue_free()
 			source_scene = null
 			return false
@@ -719,7 +721,7 @@ func _animate_death(delta: float) -> void:
 
 
 # attack_p ranges 0..1 while attacking and is negative otherwise.
-func animate(delta: float, moving: bool, running: bool, attack_p: float, ranged: bool = false) -> void:
+func animate(delta: float, moving: bool, running: bool, attack_p: float, ranged: bool = false, blocking: bool = false, dodging: bool = false, dashing: bool = false) -> void:
 	time += delta
 	flash = maxf(0.0, flash - delta * 5.0)
 	hit_t = maxf(0.0, hit_t - delta)
@@ -734,6 +736,30 @@ func animate(delta: float, moving: bool, running: bool, attack_p: float, ranged:
 
 	if hit_t > 0.0 and _play_motion("hit", 1.0, 0.06):
 		return
+
+	if blocking:
+		if _play_motion("block", 1.0, 0.08):
+			return
+		if _play_clip(["block", "guard", "defend", "shield"]):
+			return
+
+	if dodging:
+		if anim_player != null and anim_player.has_animation("motion/dodge"):
+			var dodge_animation := anim_player.get_animation("motion/dodge")
+			var dodge_speed: float = clampf(dodge_animation.length / 0.42, 0.65, 4.0)
+			if _play_motion("dodge", dodge_speed, 0.04):
+				return
+		if _play_clip(["dodge", "evade", "roll", "slide"]):
+			return
+
+	if dashing:
+		if anim_player != null and anim_player.has_animation("motion/dash"):
+			var dash_animation := anim_player.get_animation("motion/dash")
+			var dash_speed: float = clampf(dash_animation.length / 0.30, 0.65, 4.0)
+			if _play_motion("dash", dash_speed, 0.04):
+				return
+		if _play_clip(["dash", "run", "sprint", "forward"]):
+			return
 
 	if attack_p >= 0.0:
 		var style := "bow" if ranged else attack_style

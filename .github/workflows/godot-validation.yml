@@ -1,0 +1,45 @@
+name: Godot validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install Godot 4.7.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          wget -q https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -q Godot_v4.7.2-stable_linux.x86_64.zip -d godot-bin
+          chmod +x godot-bin/Godot_v4.7.2-stable_linux.x86_64
+          echo "GODOT=$PWD/godot-bin/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+
+      - name: Import project resources
+        run: "$GODOT --headless --path HarbAlHadarat --editor --quit"
+
+      - name: Start the project headlessly
+        run: "$GODOT --headless --path HarbAlHadarat --quit-after 120"
+
+      - name: Audit GLB and FBX assets
+        run: "$GODOT --headless --path HarbAlHadarat --script res://tests/animation_asset_audit.gd"
+
+      - name: Test player rigs and action animations
+        run: "$GODOT --headless --path HarbAlHadarat --script res://tests/rig_smoke_test.gd"
+
+      - name: Test gameplay controls
+        run: "$GODOT --headless --path HarbAlHadarat --script res://tests/game_controls_smoke_test.gd"
+
+      - name: Test Oran retargeting
+        run: "$GODOT --headless --path HarbAlHadarat --script res://tests/retarget_smoke_test.gd"

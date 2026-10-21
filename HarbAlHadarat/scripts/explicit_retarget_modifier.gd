@@ -1,63 +1,35 @@
 
 extends SkeletonModifier3D
 
-# Explicit bone links:
-# [target_name, FBX_name, FBX_index, GLB_index, GLB_parent_index, FBX_parent_index]
-# FBX: 65 bones
-# GLB: 40 bones
-# FBX Spine1 (index 2) is not mapped directly. Its animated rotation is
-# preserved through the global rest-relative rotation transfer.
+# Retarget Mixamo's 65-bone animation source onto Oran's 23-bone GLB rig.
+# Only bones present in both hierarchies are mapped; Oran's separate Root is
+# kept at rest. Spine1 is mapped directly rather than being discarded.
 
 const BONE_LINKS := [
-	["pelvis", "mixamorig_Hips", 0, 1, 0, -1],
-	["spine", "mixamorig_Spine", 1, 2, 1, 0],
-	["chest", "mixamorig_Spine2", 3, 3, 2, 2],
-	["neck", "mixamorig_Neck", 4, 4, 3, 3],
-	["head", "mixamorig_Head", 5, 5, 4, 4],
-
-	["clavicle_L", "mixamorig_LeftShoulder", 31, 6, 3, 3],
-	["upper_arm_L", "mixamorig_LeftArm", 32, 7, 6, 31],
-	["forearm_L", "mixamorig_LeftForeArm", 33, 8, 7, 32],
-	["hand_L", "mixamorig_LeftHand", 34, 9, 8, 33],
-
-	["finger1_1_L", "mixamorig_LeftHandIndex1", 39, 10, 9, 34],
-	["finger1_2_L", "mixamorig_LeftHandIndex2", 40, 11, 10, 39],
-	["finger1_3_L", "mixamorig_LeftHandIndex3", 41, 12, 11, 40],
-
-	["finger2_1_L", "mixamorig_LeftHandMiddle1", 43, 13, 9, 34],
-	["finger2_2_L", "mixamorig_LeftHandMiddle2", 44, 14, 13, 43],
-	["finger2_3_L", "mixamorig_LeftHandMiddle3", 45, 15, 14, 44],
-
-	["finger3_1_L", "mixamorig_LeftHandRing1", 47, 16, 9, 34],
-	["finger3_2_L", "mixamorig_LeftHandRing2", 48, 17, 16, 47],
-	["finger3_3_L", "mixamorig_LeftHandRing3", 49, 18, 17, 48],
-
-	["clavicle_R", "mixamorig_RightShoulder", 7, 19, 3, 3],
-	["upper_arm_R", "mixamorig_RightArm", 8, 20, 19, 7],
-	["forearm_R", "mixamorig_RightForeArm", 9, 21, 20, 8],
-	["hand_R", "mixamorig_RightHand", 10, 22, 21, 9],
-
-	["finger1_1_R", "mixamorig_RightHandIndex1", 15, 23, 22, 10],
-	["finger1_2_R", "mixamorig_RightHandIndex2", 16, 24, 23, 15],
-	["finger1_3_R", "mixamorig_RightHandIndex3", 17, 25, 24, 16],
-
-	["finger2_1_R", "mixamorig_RightHandMiddle1", 19, 26, 22, 10],
-	["finger2_2_R", "mixamorig_RightHandMiddle2", 20, 27, 26, 19],
-	["finger2_3_R", "mixamorig_RightHandMiddle3", 21, 28, 27, 20],
-
-	["finger3_1_R", "mixamorig_RightHandRing1", 23, 29, 22, 10],
-	["finger3_2_R", "mixamorig_RightHandRing2", 24, 30, 29, 23],
-	["finger3_3_R", "mixamorig_RightHandRing3", 25, 31, 30, 24],
-
-	["thigh_L", "mixamorig_LeftUpLeg", 60, 32, 1, 0],
-	["lower_leg_L", "mixamorig_LeftLeg", 61, 33, 32, 60],
-	["foot_L", "mixamorig_LeftFoot", 62, 34, 33, 61],
-	["toe_L", "mixamorig_LeftToeBase", 63, 35, 34, 62],
-
-	["thigh_R", "mixamorig_RightUpLeg", 55, 36, 1, 0],
-	["lower_leg_R", "mixamorig_RightLeg", 56, 37, 36, 55],
-	["foot_R", "mixamorig_RightFoot", 57, 38, 37, 56],
-	["toe_R", "mixamorig_RightToeBase", 58, 39, 38, 57],
+	# Oran uses a 23-bone Mixamo body rig (including a separate Root).
+	# Rows: [target_name, FBX_name, FBX_index, GLB_index, GLB_parent_index, FBX_parent_index]
+	["mixamorig_Hips", "mixamorig_Hips", 0, 1, 0, -1],
+	["mixamorig_Spine", "mixamorig_Spine", 1, 2, 1, 0],
+	["mixamorig_Spine1", "mixamorig_Spine1", 2, 3, 2, 1],
+	["mixamorig_Spine2", "mixamorig_Spine2", 3, 4, 3, 2],
+	["mixamorig_Neck", "mixamorig_Neck", 4, 5, 4, 3],
+	["mixamorig_Head", "mixamorig_Head", 5, 6, 5, 4],
+	["mixamorig_LeftShoulder", "mixamorig_LeftShoulder", 31, 7, 4, 3],
+	["mixamorig_LeftArm", "mixamorig_LeftArm", 32, 8, 7, 31],
+	["mixamorig_LeftForeArm", "mixamorig_LeftForeArm", 33, 9, 8, 32],
+	["mixamorig_LeftHand", "mixamorig_LeftHand", 34, 10, 9, 33],
+	["mixamorig_RightShoulder", "mixamorig_RightShoulder", 7, 11, 4, 3],
+	["mixamorig_RightArm", "mixamorig_RightArm", 8, 12, 11, 7],
+	["mixamorig_RightForeArm", "mixamorig_RightForeArm", 9, 13, 12, 8],
+	["mixamorig_RightHand", "mixamorig_RightHand", 10, 14, 13, 9],
+	["mixamorig_LeftUpLeg", "mixamorig_LeftUpLeg", 60, 15, 1, 0],
+	["mixamorig_LeftLeg", "mixamorig_LeftLeg", 61, 16, 15, 60],
+	["mixamorig_LeftFoot", "mixamorig_LeftFoot", 62, 17, 16, 61],
+	["mixamorig_LeftToeBase", "mixamorig_LeftToeBase", 63, 18, 17, 62],
+	["mixamorig_RightUpLeg", "mixamorig_RightUpLeg", 55, 19, 1, 0],
+	["mixamorig_RightLeg", "mixamorig_RightLeg", 56, 20, 19, 55],
+	["mixamorig_RightFoot", "mixamorig_RightFoot", 57, 21, 20, 56],
+	["mixamorig_RightToeBase", "mixamorig_RightToeBase", 58, 22, 21, 57],
 ]
 
 var source_skeleton: Skeleton3D

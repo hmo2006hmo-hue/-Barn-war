@@ -1,7 +1,7 @@
 extends SceneTree
 
-const SOURCE_FBX := "res://assets/_fbx_audit/Great Sword Slash.fbx"
-const TARGET_GLB := "res://assets/characters/المحارب السومري حامل الرمح.glb"
+const SOURCE_FBX := "res://assets/animations/Great Sword Slash.fbx"
+const TARGET_GLB := "res://assets/characters/اوران .glb"
 
 func _initialize() -> void:
     call_deferred("_run")

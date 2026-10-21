@@ -1,8 +1,8 @@
 extends SceneTree
 
 const ExplicitRetargetModifier = preload("res://scripts/explicit_retarget_modifier.gd")
-const SOURCE_FBX := "res://assets/_fbx_audit/Great Sword Slash.fbx"
-const TARGET_GLB := "res://assets/characters/المحارب السومري حامل الرمح.glb"
+const SOURCE_FBX := "res://assets/animations/Great Sword Slash.fbx"
+const TARGET_GLB := "res://assets/characters/اوران .glb"
 const ANGLE_TOLERANCE := 0.035
 const POSITION_TOLERANCE := 0.0001
 
@@ -118,7 +118,7 @@ func _run() -> void:
     var spine1_delta := source_skeleton.get_bone_global_pose(spine1_index).basis.get_rotation_quaternion().angle_to(
         source_skeleton.get_bone_global_rest(spine1_index).basis.get_rotation_quaternion()
     )
-    var chest_index := 3
+    var chest_index := 4
     var chest_delta := target_skeleton.get_bone_pose_rotation(chest_index).angle_to(
         target_skeleton.get_bone_rest(chest_index).basis.get_rotation_quaternion()
     )
@@ -143,11 +143,11 @@ func _run() -> void:
         _fail("actual target local rotations diverge from explicit rest-relative global mapping")
         return
     if spine1_delta < 0.01:
-        _fail("chosen test time did not exercise the unmapped source Spine1 bone")
+        _fail("source Spine1 did not move at the inspected frame")
         return
     if chest_delta < 0.01:
-        _fail("source animation did not transfer a rotation to target chest")
+        _fail("source animation did not transfer a rotation to Oran's Spine2/chest")
         return
 
-    print("RETARGET_EXPLICIT_PASS: exact bone indices and parent hierarchies validated; unmapped Spine1 motion contributes without stretching GLB bones.")
+    print("RETARGET_EXPLICIT_PASS: exact bone indices and parent hierarchies validated; Spine1 motion reaches Oran without stretching its bones.")
     quit(0)
