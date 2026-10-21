@@ -38,5 +38,8 @@ jobs:
       - name: Test player rigs and action animations
         run: "$GODOT --headless --path HarbAlHadarat --script res://tests/rig_smoke_test.gd"
 
+      - name: Test gameplay controls
+        run: "$GODOT --headless --path HarbAlHadarat --script res://tests/game_controls_smoke_test.gd"
+
       - name: Test Oran retargeting
         run: "$GODOT --headless --path HarbAlHadarat --script res://tests/retarget_smoke_test.gd"
