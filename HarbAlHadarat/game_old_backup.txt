@@ -1,0 +1,1122 @@
+extends Node3D
+
+# ==================================================
+# حرب الحضارات - الإصدار الثاني
+# القائمة الرئيسية + تحكم + أعداء + حركة للجسم
+# ==================================================
+
+const CHARACTER_FOLDER := "res://assets/characters"
+const BUILDING_FOLDER := "res://assets/environment"
+const SPAWN_POINT := Vector3(0.0, 0.05, 10.0)
+
+const PLAYER_HEIGHT := 1.75
+const PLAYER_MAX_HP := 100.0
+const ENEMY_COUNT := 4
+const ENEMY_MAX_HP := 3.0
+const ENEMY_SPEED := 2.2
+const ENEMY_DAMAGE := 8.0
+const ENEMY_COOLDOWN := 1.4
+const ENEMY_ATTACK_RANGE := 1.8
+const PLAYER_ATTACK_RANGE := 2.4
+const ATTACK_DURATION := 0.45
+
+# زاوية إنزال الذراعين من وضعية T (بالراديان). إذا بدت الذراعان غريبتين، غيّرها.
+const ARM_DROP := 1.3
+# قوة تأرجح الساقين والذراعين أثناء المشي (بالراديان).
+const SWING := 0.6
+
+enum State { MENU, PLAYING, GAME_OVER }
+
+var state: int = State.MENU
+var character_files: Array[String] = []
+var building_files: Array[String] = []
+var scan_note: String = ""
+var selected_index: int = 0
+
+var world_root: Node3D
+var player: CharacterBody3D
+var player_model: Node3D
+var player_rig: Dictionary = {}
+var camera: Camera3D
+var camera_yaw: float = 0.0
+var camera_pitch: float = -0.12
+var camera_distance: float = 4.5
+var camera_dragging: bool = false
+
+var move_speed: float = 4.2
+var running: bool = false
+var gravity_strength: float = 18.0
+var player_hp: float = PLAYER_MAX_HP
+var player_attack_timer: float = 0.0
+var kills: int = 0
+var wave: int = 1
+var time_passed: float = 0.0
+var message_timer: float = 0.0
+
+var enemies: Array[Dictionary] = []
+
+var touch_forward: bool = false
+var touch_backward: bool = false
+var touch_left: bool = false
+var touch_right: bool = false
+
+var ui_layer: CanvasLayer
+var hud_root: Control
+var menu_root: Control
+var end_root: Control
+var info_label: Label
+var hp_bar: ProgressBar
+var message_label: Label
+var select_label: Label
+var end_info: Label
+var run_button: Button
+
+
+func _ready() -> void:
+	_scan_assets()
+	_build_world()
+	_build_player()
+	_build_camera()
+	_build_ui()
+	_show_menu()
+
+
+# --------------------------------------------------
+# قراءة ملفات GLB و GLTF
+# --------------------------------------------------
+
+func _list_model_files(folder_path: String) -> Array[String]:
+	var result: Array[String] = []
+	var seen := {}
+	var directory := DirAccess.open(folder_path)
+
+	if directory == null:
+		scan_note = "تعذر فتح المجلد: " + folder_path
+		push_warning("تعذر فتح مجلد الأصول: " + folder_path)
+		return result
+
+	directory.list_dir_begin()
+	var filename := directory.get_next()
+
+	while filename != "":
+		if not directory.current_is_dir():
+			# في التطبيق النهائي (APK) تظهر الملفات بلاحقة .remap بدل .glb
+			var real_name := filename
+			for suffix in [".remap", ".import"]:
+				if real_name.ends_with(suffix):
+					real_name = real_name.trim_suffix(suffix)
+
+			var extension := real_name.get_extension().to_lower()
+
+			if (extension == "glb" or extension == "gltf") and not seen.has(real_name):
+				seen[real_name] = true
+				result.append(folder_path + "/" + real_name)
+
+		filename = directory.get_next()
+
+	directory.list_dir_end()
+	result.sort()
+	return result
+
+
+func _is_building_filename(filename: String) -> bool:
+	match filename:
+		"السور والبوابة.glb":
+			return true
+		"المزرعة السومرية.glb":
+			return true
+		"برج_المراقبة.glb":
+			return true
+		"مخزن_الموارد.glb":
+			return true
+		"مركز الحضارة_السومرية.glb":
+			return true
+		"ثكنة_الجنود.glb":
+			return true
+		"مبنی.glb":
+			return true
+		_:
+			return false
+
+
+func _scan_assets() -> void:
+	character_files.clear()
+	building_files.clear()
+	scan_note = ""
+
+	for path in _list_model_files(CHARACTER_FOLDER):
+		if not _is_building_filename(path.get_file()):
+			character_files.append(path)
+
+	building_files = _list_model_files(BUILDING_FOLDER)
+
+	if character_files.is_empty() and building_files.is_empty() and scan_note == "":
+		scan_note = "لم يجد البرنامج أي ملف GLB داخل assets"
+
+
+# --------------------------------------------------
+# البيئة والإضاءة والأرض
+# --------------------------------------------------
+
+func _build_world() -> void:
+	world_root = Node3D.new()
+	world_root.name = "World"
+	add_child(world_root)
+
+	var world_environment := WorldEnvironment.new()
+	world_environment.name = "WorldEnvironment"
+
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color(0.42, 0.53, 0.66)
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.72, 0.70, 0.62)
+	environment.ambient_light_energy = 0.8
+	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+
+	world_environment.environment = environment
+	world_root.add_child(world_environment)
+
+	var sun := DirectionalLight3D.new()
+	sun.name = "SunLight"
+	sun.rotation_degrees = Vector3(-48.0, -30.0, 0.0)
+	sun.light_energy = 1.25
+	world_root.add_child(sun)
+
+	_make_box("Ground", Vector3(0.0, -0.25, 0.0), Vector3(100.0, 0.5, 100.0), Color(0.24, 0.29, 0.19), true)
+	_make_box("Battlefield", Vector3(0.0, 0.015, 0.0), Vector3(22.0, 0.03, 22.0), Color(0.43, 0.38, 0.29), false)
+	_make_box("MarkerNorth", Vector3(0.0, 0.55, -11.0), Vector3(0.15, 1.1, 0.15), Color(0.62, 0.17, 0.12), false)
+	_make_box("MarkerSouth", Vector3(0.0, 0.55, 11.0), Vector3(0.15, 1.1, 0.15), Color(0.62, 0.17, 0.12), false)
+
+	_spawn_buildings()
+
+
+func _make_box(object_name: String, pos: Vector3, dimensions: Vector3, color: Color, with_collision: bool) -> void:
+	var body: Node3D
+
+	if with_collision:
+		body = StaticBody3D.new()
+	else:
+		body = Node3D.new()
+
+	body.name = object_name
+	body.position = pos
+
+	var mesh_instance := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = dimensions
+	mesh_instance.mesh = box_mesh
+
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.92
+	mesh_instance.material_override = material
+
+	body.add_child(mesh_instance)
+
+	if with_collision:
+		var collision := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = dimensions
+		collision.shape = shape
+		body.add_child(collision)
+
+	world_root.add_child(body)
+
+
+# --------------------------------------------------
+# تحميل المباني من assets/environment
+# --------------------------------------------------
+
+func _building_layout(filename: String) -> Dictionary:
+	match filename:
+		"السور والبوابة.glb":
+			return {"position": Vector3(0.0, 0.0, -27.0), "height": 4.5, "rotation": 0.0}
+		"المزرعة السومرية.glb":
+			return {"position": Vector3(17.0, 0.0, -15.0), "height": 3.5, "rotation": 0.0}
+		"برج_المراقبة.glb":
+			return {"position": Vector3(-17.0, 0.0, -15.0), "height": 7.0, "rotation": 0.0}
+		"مخزن_الموارد.glb":
+			return {"position": Vector3(17.0, 0.0, 0.0), "height": 4.0, "rotation": 0.0}
+		"مركز الحضارة_السومرية.glb":
+			return {"position": Vector3(0.0, 0.0, -16.0), "height": 6.0, "rotation": 0.0}
+		"ثكنة_الجنود.glb":
+			return {"position": Vector3(-17.0, 0.0, 0.0), "height": 4.5, "rotation": 0.0}
+		"مبنی.glb":
+			return {"position": Vector3(0.0, 0.0, -5.0), "height": 4.0, "rotation": 0.0}
+		_:
+			return {"position": Vector3(0.0, 0.0, -20.0), "height": 4.0, "rotation": 0.0}
+
+
+func _spawn_buildings() -> void:
+	for path in building_files:
+		var packed_scene := ResourceLoader.load(path) as PackedScene
+
+		if packed_scene == null:
+			push_warning("تعذر تحميل المبنى: " + path)
+			continue
+
+		var model := packed_scene.instantiate() as Node3D
+
+		if model == null:
+			continue
+
+		var filename := path.get_file()
+		var layout: Dictionary = _building_layout(filename)
+
+		var building_body := StaticBody3D.new()
+		building_body.name = filename.get_basename()
+		building_body.position = layout["position"]
+		building_body.rotation.y = float(layout["rotation"])
+
+		world_root.add_child(building_body)
+		building_body.add_child(model)
+
+		var bounds := _get_model_bounds(model)
+
+		if bounds.size.y <= 0.001:
+			continue
+
+		var target_height: float = float(layout["height"])
+		var scale_factor: float = clampf(target_height / bounds.size.y, 0.01, 100.0)
+
+		model.scale = Vector3.ONE * scale_factor
+		model.position = Vector3(
+			-(bounds.position.x + bounds.size.x * 0.5) * scale_factor,
+			-bounds.position.y * scale_factor,
+			-(bounds.position.z + bounds.size.z * 0.5) * scale_factor
+		)
+
+		var scaled_size: Vector3 = bounds.size * scale_factor
+		var box_size := Vector3(maxf(scaled_size.x, 0.8), maxf(scaled_size.y, 1.0), maxf(scaled_size.z, 0.8))
+
+		var collision := CollisionShape3D.new()
+		collision.name = "BuildingCollision"
+		var shape := BoxShape3D.new()
+		shape.size = box_size
+		collision.shape = shape
+		collision.position = Vector3(0.0, box_size.y * 0.5, 0.0)
+		building_body.add_child(collision)
+
+
+# --------------------------------------------------
+# اللاعب
+# --------------------------------------------------
+
+func _build_player() -> void:
+	player = CharacterBody3D.new()
+	player.name = "Player"
+	player.position = SPAWN_POINT
+	add_child(player)
+
+	var collision := CollisionShape3D.new()
+	collision.name = "PlayerCollision"
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.32
+	capsule.height = 1.8
+	collision.shape = capsule
+	collision.position.y = 0.9
+	player.add_child(collision)
+
+	player_model = Node3D.new()
+	player_model.name = "CharacterModel"
+	player.add_child(player_model)
+
+
+func _build_camera() -> void:
+	camera = Camera3D.new()
+	camera.name = "ThirdPersonCamera"
+	camera.fov = 75.0
+	camera.current = true
+	add_child(camera)
+	_update_camera_position()
+
+
+func _update_camera_position() -> void:
+	if not is_instance_valid(camera) or not is_instance_valid(player):
+		return
+
+	var target := player.global_position + Vector3(0.0, 1.35, 0.0)
+	var direction := Vector3(
+		sin(camera_yaw) * cos(camera_pitch),
+		sin(camera_pitch),
+		cos(camera_yaw) * cos(camera_pitch)
+	)
+
+	camera.global_position = target + direction * camera_distance
+	camera.look_at(target, Vector3.UP)
+
+
+# --------------------------------------------------
+# إنشاء الشخصيات وتجهيز هيكلها العظمي
+# --------------------------------------------------
+
+# ينشئ شخصية داخل parent. يجب أن يكون parent داخل الشجرة قبل حساب الأبعاد.
+func _create_character(path: String, parent: Node) -> Node3D:
+	var holder := Node3D.new()
+	parent.add_child(holder)
+
+	var model: Node3D = null
+
+	if path != "":
+		var packed := ResourceLoader.load(path) as PackedScene
+		if packed != null:
+			model = packed.instantiate() as Node3D
+
+	if model == null:
+		holder.add_child(_make_placeholder_soldier())
+		holder.set_meta("rig", {})
+		return holder
+
+	holder.add_child(model)
+	_fit_to_ground(model, PLAYER_HEIGHT)
+	holder.set_meta("rig", _find_rig(model))
+	return holder
+
+
+func _fit_to_ground(model: Node3D, target_height: float) -> void:
+	var bounds := _get_model_bounds(model)
+
+	if bounds.size.y <= 0.001:
+		return
+
+	var scale_factor: float = clampf(target_height / bounds.size.y, 0.01, 100.0)
+	model.scale = Vector3.ONE * scale_factor
+	model.position = Vector3(
+		-(bounds.position.x + bounds.size.x * 0.5) * scale_factor,
+		-bounds.position.y * scale_factor,
+		-(bounds.position.z + bounds.size.z * 0.5) * scale_factor
+	)
+
+
+func _make_placeholder_soldier() -> Node3D:
+	var root := Node3D.new()
+
+	var body_mesh := MeshInstance3D.new()
+	var body_capsule := CapsuleMesh.new()
+	body_capsule.radius = 0.32
+	body_capsule.height = 1.0
+	body_mesh.mesh = body_capsule
+	body_mesh.position.y = 1.0
+	var body_material := StandardMaterial3D.new()
+	body_material.albedo_color = Color(0.32, 0.27, 0.18)
+	body_mesh.material_override = body_material
+	root.add_child(body_mesh)
+
+	var head_mesh := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.2
+	sphere.height = 0.4
+	head_mesh.mesh = sphere
+	head_mesh.position.y = 1.68
+	var head_material := StandardMaterial3D.new()
+	head_material.albedo_color = Color(0.65, 0.47, 0.34)
+	head_mesh.material_override = head_material
+	root.add_child(head_mesh)
+
+	return root
+
+
+# يجد الهيكل العظمي والمفاصل وأي مشغّل حركات موجود داخل الملف.
+func _find_rig(model: Node3D) -> Dictionary:
+	var rig: Dictionary = {"skeleton": null, "bones": {}, "anim": null, "drop_L": 0.0, "drop_R": 0.0}
+
+	var skeletons := model.find_children("*", "Skeleton3D", true, false)
+	if not skeletons.is_empty():
+		var skel := skeletons[0] as Skeleton3D
+		rig["skeleton"] = skel
+		var bones: Dictionary = rig["bones"]
+		for i in skel.get_bone_count():
+			bones[skel.get_bone_name(i)] = i
+		rig["drop_L"] = _arm_drop(skel, "upper_arm_L", "forearm_L")
+		rig["drop_R"] = _arm_drop(skel, "upper_arm_R", "forearm_R")
+
+	var players := model.find_children("*", "AnimationPlayer", true, false)
+	if not players.is_empty():
+		rig["anim"] = players[0]
+
+	return rig
+
+
+func _arm_drop(skel: Skeleton3D, upper: String, lower: String) -> float:
+	var upper_index := skel.find_bone(upper)
+	var lower_index := skel.find_bone(lower)
+
+	if upper_index < 0 or lower_index < 0:
+		return 0.0
+
+	var a := skel.get_bone_global_rest(upper_index).origin
+	var b := skel.get_bone_global_rest(lower_index).origin
+	var side := signf(b.x - a.x)
+
+	if side == 0.0:
+		side = 1.0
+
+	return -side * ARM_DROP
+
+
+# --------------------------------------------------
+# الحركة: تستخدم حركات الملف إن وُجدت، وإلا تحرّك المفاصل بالكود
+# --------------------------------------------------
+
+func _play_clip(rig: Dictionary, keyword: String) -> bool:
+	var anim := rig.get("anim") as AnimationPlayer
+	if anim == null:
+		return false
+
+	for clip in anim.get_animation_list():
+		var clip_name := String(clip)
+		if clip_name.to_lower().contains(keyword):
+			if anim.current_animation != clip_name:
+				anim.play(clip_name)
+			return true
+
+	return false
+
+
+func _set_bone(rig: Dictionary, bone_name: String, pose: Quaternion) -> void:
+	var skel := rig.get("skeleton") as Skeleton3D
+	if skel == null:
+		return
+
+	var bones: Dictionary = rig["bones"]
+	if not bones.has(bone_name):
+		return
+
+	skel.set_bone_pose_rotation(bones[bone_name], pose)
+
+
+# attack_p: من 0 إلى 1 أثناء الهجوم، وأقل من 0 إذا لم يكن هناك هجوم.
+func _animate_character(rig: Dictionary, moving: bool, attack_p: float) -> void:
+	if rig.is_empty():
+		return
+
+	if attack_p >= 0.0 and _play_clip(rig, "attack"):
+		return
+	if _play_clip(rig, "walk" if moving else "idle"):
+		return
+
+	var swing := sin(time_passed * 8.0) * SWING if moving else 0.0
+	var breathe := 0.0 if moving else sin(time_passed * 2.0) * 0.03
+	var drop_l := float(rig.get("drop_L", 0.0))
+	var drop_r := float(rig.get("drop_R", 0.0))
+
+	_set_bone(rig, "spine", Quaternion(Vector3.RIGHT, breathe))
+	_set_bone(rig, "thigh_L", Quaternion(Vector3.RIGHT, swing))
+	_set_bone(rig, "thigh_R", Quaternion(Vector3.RIGHT, -swing))
+	_set_bone(rig, "upper_arm_L", Quaternion(Vector3.BACK, drop_l) * Quaternion(Vector3.RIGHT, -swing * 0.5))
+
+	var right_arm: Quaternion
+	if attack_p >= 0.0:
+		right_arm = Quaternion(Vector3.RIGHT, lerpf(-1.8, 0.4, attack_p)) * Quaternion(Vector3.BACK, drop_r * 0.3)
+	else:
+		right_arm = Quaternion(Vector3.BACK, drop_r) * Quaternion(Vector3.RIGHT, swing * 0.5)
+	_set_bone(rig, "upper_arm_R", right_arm)
+
+
+func _attack_progress(timer: float) -> float:
+	if timer <= 0.0:
+		return -1.0
+	return 1.0 - timer / ATTACK_DURATION
+
+
+# --------------------------------------------------
+# قراءة حدود المجسم
+# --------------------------------------------------
+
+func _get_model_bounds(root: Node3D) -> AABB:
+	var result := AABB()
+	var found_point := false
+
+	var visual_nodes := root.find_children("*", "VisualInstance3D", true, false)
+
+	if root is VisualInstance3D:
+		visual_nodes.append(root)
+
+	for node in visual_nodes:
+		var visual := node as VisualInstance3D
+
+		if visual == null:
+			continue
+
+		var box: AABB = visual.get_aabb()
+
+		var corners: Array[Vector3] = [
+			box.position,
+			Vector3(box.end.x, box.position.y, box.position.z),
+			Vector3(box.position.x, box.end.y, box.position.z),
+			Vector3(box.position.x, box.position.y, box.end.z),
+			Vector3(box.end.x, box.end.y, box.position.z),
+			Vector3(box.end.x, box.position.y, box.end.z),
+			Vector3(box.position.x, box.end.y, box.end.z),
+			box.end
+		]
+
+		for corner in corners:
+			var point: Vector3 = root.to_local(visual.to_global(corner))
+
+			if not found_point:
+				result = AABB(point, Vector3.ZERO)
+				found_point = true
+			else:
+				result = result.expand(point)
+
+	return result
+
+
+# --------------------------------------------------
+# واجهة المستخدم: القائمة، الشاشة أثناء اللعب، شاشة النهاية
+# --------------------------------------------------
+
+# طبقة تغطي الشاشة كلها ولا تعترض اللمس
+func _full_root() -> Control:
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(root)
+	return root
+
+
+# يضع عنصراً بالإحداثيات المطلقة عبر الهوامش، وهذا أكثر ثباتاً من position
+# left_side: هل نقيس من اليسار أو اليمين. bottom: هل نقيس من الأسفل أو الأعلى.
+func _place(c: Control, left_side: bool, bottom: bool, x: float, y: float, w: float, h: float) -> void:
+	var ax := 0.0 if left_side else 1.0
+	var ay := 1.0 if bottom else 0.0
+
+	c.anchor_left = ax
+	c.anchor_right = ax
+	c.anchor_top = ay
+	c.anchor_bottom = ay
+
+	if left_side:
+		c.offset_left = x
+		c.offset_right = x + w
+	else:
+		c.offset_left = -x - w
+		c.offset_right = -x
+
+	if bottom:
+		c.offset_top = -y - h
+		c.offset_bottom = -y
+	else:
+		c.offset_top = y
+		c.offset_bottom = y + h
+
+
+func _make_button(text: String, w: float, h: float) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(w, h)
+	b.add_theme_font_size_override("font_size", 22)
+	return b
+
+
+func _make_label(text: String, font_size: int) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", font_size)
+	return l
+
+
+# صندوق في منتصف الشاشة لوضع العناصر عمودياً
+func _make_center_box(root: Control) -> VBoxContainer:
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(300, 0)
+	box.add_theme_constant_override("separation", 16)
+	center.add_child(box)
+	return box
+
+
+func _build_ui() -> void:
+	ui_layer = CanvasLayer.new()
+	ui_layer.name = "UI"
+	add_child(ui_layer)
+
+	_build_hud()
+	_build_menu()
+	_build_end_screen()
+
+
+func _build_hud() -> void:
+	hud_root = _full_root()
+
+	var panel := PanelContainer.new()
+	panel.layout_direction = Control.LAYOUT_DIRECTION_LTR
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.position = Vector2(12.0, 12.0)
+	hud_root.add_child(panel)
+
+	var box := VBoxContainer.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(box)
+
+	info_label = Label.new()
+	info_label.add_theme_font_size_override("font_size", 15)
+	box.add_child(info_label)
+
+	hp_bar = ProgressBar.new()
+	hp_bar.max_value = PLAYER_MAX_HP
+	hp_bar.show_percentage = false
+	hp_bar.custom_minimum_size = Vector2(230, 14)
+	box.add_child(hp_bar)
+
+	message_label = _make_label("", 30)
+	message_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	message_label.offset_top = 90.0
+	message_label.offset_bottom = 140.0
+	message_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	message_label.visible = false
+	hud_root.add_child(message_label)
+
+	# أسهم الحركة في الجهة اليسرى السفلى
+	_hold_button("↑", "forward", true, true, 76.0, 124.0)
+	_hold_button("↓", "backward", true, true, 76.0, 12.0)
+	_hold_button("←", "left", true, true, 15.0, 68.0)
+	_hold_button("→", "right", true, true, 137.0, 68.0)
+
+	# أزرار الأوامر في الجهة اليمنى
+	_action_button("هجوم", false, true, 20.0, 20.0, 120.0, 64.0, _player_attack)
+	run_button = _action_button("ركض", false, true, 20.0, 96.0, 120.0, 52.0, _toggle_running)
+	_action_button("القائمة", false, false, 12.0, 12.0, 110.0, 44.0, _show_menu)
+
+
+func _hold_button(text: String, axis: String, left_side: bool, bottom: bool, x: float, y: float) -> void:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_size_override("font_size", 22)
+	_place(b, left_side, bottom, x, y, 58.0, 58.0)
+	b.button_down.connect(func() -> void:
+		_set_touch_axis(axis, true)
+	)
+	b.button_up.connect(func() -> void:
+		_set_touch_axis(axis, false)
+	)
+	hud_root.add_child(b)
+
+
+func _action_button(text: String, left_side: bool, bottom: bool, x: float, y: float, w: float, h: float, callback: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_size_override("font_size", 18)
+	_place(b, left_side, bottom, x, y, w, h)
+	b.pressed.connect(callback)
+	hud_root.add_child(b)
+	return b
+
+
+func _build_menu() -> void:
+	menu_root = _full_root()
+	var box := _make_center_box(menu_root)
+
+	box.add_child(_make_label("حرب الحضارات", 36))
+
+	var pick := HBoxContainer.new()
+	pick.alignment = BoxContainer.ALIGNMENT_CENTER
+	pick.add_theme_constant_override("separation", 12)
+	box.add_child(pick)
+
+	var prev := _make_button("◀", 60.0, 50.0)
+	prev.pressed.connect(_on_prev_pressed)
+	pick.add_child(prev)
+
+	select_label = _make_label("", 20)
+	select_label.custom_minimum_size = Vector2(170, 0)
+	pick.add_child(select_label)
+
+	var next := _make_button("▶", 60.0, 50.0)
+	next.pressed.connect(_on_next_pressed)
+	pick.add_child(next)
+
+	var start := _make_button("ابدأ اللعب", 260.0, 62.0)
+	start.pressed.connect(_start_game)
+	box.add_child(start)
+
+	var hint := _make_label("الأسهم للحركة، زر هجوم للقتال، واسحب الشاشة لتدوير الكاميرا", 14)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.custom_minimum_size = Vector2(300, 0)
+	box.add_child(hint)
+
+
+func _build_end_screen() -> void:
+	end_root = _full_root()
+	var box := _make_center_box(end_root)
+
+	box.add_child(_make_label("انتهت المعركة", 32))
+
+	end_info = _make_label("", 18)
+	box.add_child(end_info)
+
+	var retry := _make_button("إعادة المحاولة", 260.0, 56.0)
+	retry.pressed.connect(_start_game)
+	box.add_child(retry)
+
+	var back := _make_button("القائمة الرئيسية", 260.0, 56.0)
+	back.pressed.connect(_show_menu)
+	box.add_child(back)
+
+	end_root.visible = false
+
+
+func _selected_name() -> String:
+	if character_files.is_empty():
+		return "الشخصية المؤقتة"
+	return character_files[selected_index].get_file().get_basename()
+
+
+func _update_select_label() -> void:
+	select_label.text = _selected_name()
+
+
+func _update_hud() -> void:
+	hp_bar.value = player_hp
+	info_label.text = (
+        "حرب الحضارات\n"
+		+ "الجندي: " + _selected_name() + "\n"
+		+ "الأعداء: " + str(enemies.size())
+		+ " | القتلى: " + str(kills)
+		+ " | الموجة: " + str(wave)
+	)
+	if scan_note != "":
+		info_label.text += "\n" + scan_note
+
+
+func _show_message(text: String, seconds: float) -> void:
+	message_label.text = text
+	message_label.visible = true
+	message_timer = seconds
+
+
+# --------------------------------------------------
+# تبديل الحالات: قائمة، لعب، نهاية
+# --------------------------------------------------
+
+func _on_prev_pressed() -> void:
+	_select_character(selected_index - 1)
+
+
+func _on_next_pressed() -> void:
+	_select_character(selected_index + 1)
+
+
+func _select_character(index: int) -> void:
+	if character_files.is_empty():
+		selected_index = 0
+	else:
+		selected_index = posmod(index, character_files.size())
+	_set_player_character()
+	_update_select_label()
+
+
+# يستبدل نموذج اللاعب بالشخصية المختارة
+func _set_player_character() -> void:
+	for child in player_model.get_children():
+		player_model.remove_child(child)
+		child.queue_free()
+
+	var path := ""
+	if not character_files.is_empty():
+		path = character_files[selected_index]
+
+	var node := _create_character(path, player_model)
+	player_rig = node.get_meta("rig", {})
+
+
+func _clear_enemies() -> void:
+	for e in enemies:
+		var node: Node3D = e["node"]
+		if is_instance_valid(node):
+			node.queue_free()
+	enemies.clear()
+
+
+func _clear_touch() -> void:
+	touch_forward = false
+	touch_backward = false
+	touch_left = false
+	touch_right = false
+
+
+func _show_menu() -> void:
+	state = State.MENU
+	_clear_enemies()
+	_clear_touch()
+	running = false
+	run_button.text = "ركض"
+	_set_player_character()
+	player_model.rotation.y = 0.0
+	message_label.visible = false
+	menu_root.visible = true
+	hud_root.visible = false
+	end_root.visible = false
+	_update_select_label()
+
+
+func _start_game() -> void:
+	kills = 0
+	wave = 1
+	player_hp = PLAYER_MAX_HP
+	player_attack_timer = 0.0
+	running = false
+	run_button.text = "ركض"
+	camera_yaw = 0.0
+	camera_pitch = -0.12
+	_clear_touch()
+
+	player.global_position = SPAWN_POINT
+	player.velocity = Vector3.ZERO
+	player_model.rotation.y = PI
+
+	_set_player_character()
+	_spawn_wave()
+
+	state = State.PLAYING
+	menu_root.visible = false
+	end_root.visible = false
+	hud_root.visible = true
+	_show_message("الموجة 1", 2.0)
+
+
+func _end_game() -> void:
+	state = State.GAME_OVER
+	_clear_touch()
+	end_info.text = "القتلى: " + str(kills) + " | الموجة: " + str(wave)
+	hud_root.visible = false
+	end_root.visible = true
+
+
+func _spawn_wave() -> void:
+	_clear_enemies()
+
+	var count := ENEMY_COUNT + wave - 1
+
+	for i in count:
+		var path := ""
+		if not character_files.is_empty():
+			path = character_files[(selected_index + 1 + i) % character_files.size()]
+
+		var node := _create_character(path, world_root)
+
+		var angle := TAU * float(i) / float(count) + randf_range(-0.25, 0.25)
+		var dist := randf_range(14.0, 18.0)
+		node.position = Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+
+		enemies.append({
+			"node": node,
+			"rig": node.get_meta("rig", {}),
+			"hp": ENEMY_MAX_HP + float(wave - 1),
+			"cooldown": randf_range(0.5, 1.5),
+			"attack_timer": 0.0,
+		})
+
+
+func _next_wave() -> void:
+	wave += 1
+	_spawn_wave()
+	_show_message("الموجة " + str(wave), 2.5)
+
+
+# --------------------------------------------------
+# القتال
+# --------------------------------------------------
+
+func _player_attack() -> void:
+	if state != State.PLAYING or player_attack_timer > 0.0:
+		return
+
+	player_attack_timer = ATTACK_DURATION
+
+	var forward := player_model.global_transform.basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
+
+	for e in enemies:
+		var node: Node3D = e["node"]
+		var to_enemy := node.global_position - player.global_position
+		to_enemy.y = 0.0
+
+		if to_enemy.length() <= PLAYER_ATTACK_RANGE and to_enemy.normalized().dot(forward) > 0.2:
+			e["hp"] = float(e["hp"]) - 1.0
+
+
+func _damage_player(amount: float) -> void:
+	if state != State.PLAYING:
+		return
+
+	player_hp = maxf(0.0, player_hp - amount)
+
+	if player_hp <= 0.0:
+		_end_game()
+
+
+func _remove_dead_enemies() -> void:
+	for i in range(enemies.size() - 1, -1, -1):
+		var e: Dictionary = enemies[i]
+		if float(e["hp"]) <= 0.0:
+			var node: Node3D = e["node"]
+			node.queue_free()
+			enemies.remove_at(i)
+			kills += 1
+
+
+func _update_enemies(delta: float) -> void:
+	for e in enemies:
+		var node: Node3D = e["node"]
+		var to_player := player.global_position - node.global_position
+		to_player.y = 0.0
+		var dist := to_player.length()
+
+		e["cooldown"] = maxf(0.0, float(e["cooldown"]) - delta)
+		e["attack_timer"] = maxf(0.0, float(e["attack_timer"]) - delta)
+
+		var moving := false
+
+		if dist > ENEMY_ATTACK_RANGE:
+			var dir := to_player / dist
+			node.position += dir * ENEMY_SPEED * delta
+			node.position.y = 0.0
+			node.rotation.y = atan2(dir.x, dir.z)
+			moving = true
+		else:
+			node.rotation.y = atan2(to_player.x, to_player.z)
+			if float(e["cooldown"]) <= 0.0:
+				e["cooldown"] = ENEMY_COOLDOWN
+				e["attack_timer"] = ATTACK_DURATION
+				_damage_player(ENEMY_DAMAGE)
+
+		_animate_character(e["rig"], moving, _attack_progress(float(e["attack_timer"])))
+
+
+# --------------------------------------------------
+# التحكم
+# --------------------------------------------------
+
+func _set_touch_axis(axis_name: String, pressed: bool) -> void:
+	match axis_name:
+		"forward":
+			touch_forward = pressed
+		"backward":
+			touch_backward = pressed
+		"left":
+			touch_left = pressed
+		"right":
+			touch_right = pressed
+
+
+func _toggle_running() -> void:
+	running = not running
+	run_button.text = "ركض: مفعّل" if running else "ركض"
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE:
+			_player_attack()
+
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			var screen_width := get_viewport().get_visible_rect().size.x
+			camera_dragging = event.position.x > screen_width * 0.45
+		else:
+			camera_dragging = false
+
+	elif event is InputEventScreenDrag:
+		if camera_dragging:
+			_rotate_camera(event.relative)
+
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			camera_dragging = event.pressed
+
+	elif event is InputEventMouseMotion:
+		if camera_dragging:
+			_rotate_camera(event.relative)
+
+
+func _rotate_camera(relative: Vector2) -> void:
+	camera_yaw -= relative.x * 0.006
+	camera_pitch = clampf(camera_pitch - relative.y * 0.004, -0.75, 0.35)
+
+
+# --------------------------------------------------
+# الحركة في كل إطار
+# --------------------------------------------------
+
+func _update_player(delta: float) -> void:
+	if not player.is_on_floor():
+		player.velocity.y -= gravity_strength * delta
+
+	var input_x := 0.0
+	var input_forward := 0.0
+
+	if touch_right:
+		input_x += 1.0
+	if touch_left:
+		input_x -= 1.0
+	if touch_forward:
+		input_forward += 1.0
+	if touch_backward:
+		input_forward -= 1.0
+
+	# لوحة المفاتيح عند الاختبار على الحاسوب
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		input_x += 1.0
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		input_x -= 1.0
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		input_forward += 1.0
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		input_forward -= 1.0
+
+	# الاتجاهات تتبع النظر الحالي للكاميرا
+	var forward := Vector3(-sin(camera_yaw), 0.0, -cos(camera_yaw))
+	var right := Vector3(cos(camera_yaw), 0.0, -sin(camera_yaw))
+
+	var direction := right * input_x + forward * input_forward
+	direction.y = 0.0
+	direction = direction.normalized()
+
+	var speed := move_speed
+	if running or Input.is_key_pressed(KEY_SHIFT):
+		speed *= 1.65
+
+	player.velocity.x = direction.x * speed
+	player.velocity.z = direction.z * speed
+
+	var moving := direction.length() > 0.1
+	if moving:
+		player_model.rotation.y = atan2(direction.x, direction.z)
+
+	player.move_and_slide()
+
+	player_attack_timer = maxf(0.0, player_attack_timer - delta)
+	_animate_character(player_rig, moving, _attack_progress(player_attack_timer))
+
+
+func _physics_process(delta: float) -> void:
+	time_passed += delta
+
+	if message_timer > 0.0:
+		message_timer -= delta
+		if message_timer <= 0.0:
+			message_label.visible = false
+
+	if state == State.PLAYING:
+		_update_player(delta)
+		_update_enemies(delta)
+		_remove_dead_enemies()
+		if enemies.is_empty():
+			_next_wave()
+	else:
+		if state == State.MENU:
+			# في القائمة تدور الكاميرا ببطء حول الجندي
+			camera_yaw += delta * 0.35
+		_animate_character(player_rig, false, -1.0)
+
+	_update_hud()
+	_update_camera_position()
