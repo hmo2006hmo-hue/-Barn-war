@@ -224,12 +224,6 @@ func _setup_animation_driver() -> bool:
 		source_scene.queue_free()
 		source_scene = null
 		return false
-	if skeleton.get_bone_count() != 40:
-		push_warning("Character rig: unexpected GLB skeleton size; expected 40 bones, got " + str(skeleton.get_bone_count()))
-		source_scene.queue_free()
-		source_scene = null
-		return false
-
 	for row in explicit_map:
 		var target_name := String(row[0])
 		var source_name := String(row[1])
@@ -245,6 +239,11 @@ func _setup_animation_driver() -> bool:
 			return false
 		if retarget_skeleton.get_bone_parent(source_index) != source_parent_index:
 			push_warning("Character rig: FBX hierarchy mismatch for " + source_name + ".")
+			source_scene.queue_free()
+			source_scene = null
+			return false
+		if target_index < 0 or target_index >= skeleton.get_bone_count():
+			push_warning("Character rig: GLB index out of range for " + target_name + ".")
 			source_scene.queue_free()
 			source_scene = null
 			return false
