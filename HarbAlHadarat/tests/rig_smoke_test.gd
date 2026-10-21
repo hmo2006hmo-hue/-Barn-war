@@ -122,6 +122,7 @@ func _run() -> void:
                 failures.append(label + ": death FBX motion did not start")
 
             rig.dead_time = -1.0
+            rig.hit_t = 0.0
             rig.attack_style = "slash"
             rig.animate(1.0 / 60.0, false, false, -1.0, false, true)
             if rig.anim_player != null and rig.anim_player.has_animation("motion/block") and rig.anim_player.current_animation != "motion/block":
