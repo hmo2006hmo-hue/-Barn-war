@@ -118,7 +118,7 @@ func _run() -> void:
     var spine1_delta := source_skeleton.get_bone_global_pose(spine1_index).basis.get_rotation_quaternion().angle_to(
         source_skeleton.get_bone_global_rest(spine1_index).basis.get_rotation_quaternion()
     )
-    var chest_index := 3
+    var chest_index := 4
     var chest_delta := target_skeleton.get_bone_pose_rotation(chest_index).angle_to(
         target_skeleton.get_bone_rest(chest_index).basis.get_rotation_quaternion()
     )
@@ -146,7 +146,7 @@ func _run() -> void:
         _fail("chosen test time did not exercise the unmapped source Spine1 bone")
         return
     if chest_delta < 0.01:
-        _fail("source animation did not transfer a rotation to target chest")
+        _fail("source animation did not transfer a rotation to Oran's Spine2/chest")
         return
 
     print("RETARGET_EXPLICIT_PASS: exact bone indices and parent hierarchies validated; unmapped Spine1 motion contributes without stretching GLB bones.")
