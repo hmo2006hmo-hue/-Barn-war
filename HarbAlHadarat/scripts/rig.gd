@@ -271,9 +271,9 @@ func _setup_animation_driver() -> bool:
 	for mesh_value in source_scene.find_children("*", "MeshInstance3D", true, false):
 		(mesh_value as Node).free()
 
-	# Apply an explicit retarget operation. It transfers rest-relative GLOBAL
-	# rotations so unmapped FBX Spine1 still contributes to target chest motion,
-	# then converts to target-local rotations without changing GLB bone lengths.
+	# Apply the explicit rest-relative local retarget operation. Spine1 is mapped
+	# directly, and only local bone rotations are transferred; Oran's bone
+	# positions, lengths, and target rest orientation remain unchanged.
 	var explicit_modifier = ExplicitRetargetModifier.new()
 	if not explicit_modifier.configure(retarget_skeleton, skeleton):
 		source_scene.queue_free()

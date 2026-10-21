@@ -142,95 +142,35 @@ func _process_modification_with_delta(_delta: float) -> void:
 	):
 		return
 
-	# Convert both skeleton coordinate frames into the common world frame.
-	# This accounts for differences between the FBX and GLB node transforms.
-	var source_to_world: Basis = (
-		source_skeleton.global_transform.basis.orthonormalized()
-	)
-
-	var target_to_world: Basis = (
-		target_skeleton.global_transform.basis.orthonormalized()
-	)
-
-	var world_to_target: Basis = target_to_world.inverse()
-
-	# Track desired target global rotations so child bones use the rotations
-	# calculated for their target parents, not the previous frame's pose.
-	var desired_target_global_basis: Dictionary = {
-		0: target_skeleton.get_bone_global_rest(0).basis.orthonormalized()
-	}
-
+	# Godot 4 bone poses include their bone-rest transforms. Retarget the
+	# rest-relative LOCAL rotation delta, not a world/global rotation delta.
+	# A global delta also contains the rotations of every animated ancestor;
+	# applying that delta again to each child produces the severe torso/limb
+	# twisting visible on Oran, including during the idle animation.
 	for row in BONE_LINKS:
 		var source_index: int = int(row[2])
 		var target_index: int = int(row[3])
-		var target_parent_index: int = int(row[4])
 
-		var source_pose_global: Transform3D = (
-			source_skeleton.get_bone_global_pose(source_index)
-		)
+		var source_rest: Transform3D = source_skeleton.get_bone_rest(source_index)
+		var source_pose: Transform3D = source_skeleton.get_bone_pose(source_index)
+		var target_rest: Transform3D = target_skeleton.get_bone_rest(target_index)
 
-		var source_rest_global: Transform3D = (
-			source_skeleton.get_bone_global_rest(source_index)
-		)
+		var source_rest_basis: Basis = source_rest.basis.orthonormalized()
+		var source_pose_basis: Basis = source_pose.basis.orthonormalized()
+		var target_rest_basis: Basis = target_rest.basis.orthonormalized()
 
-		var target_rest_global: Transform3D = (
-			target_skeleton.get_bone_global_rest(target_index)
-		)
-
-		# Express the animated FBX pose and its rest pose in world coordinates.
-		var source_pose_world: Basis = (
-			source_to_world * source_pose_global.basis
+		# Remove the source bone's rest orientation, then apply only its local
+		# animation delta after the target bone's own rest orientation.
+		# This maps identity back to the exact target rest pose.
+		var source_local_delta: Basis = (
+			source_rest_basis.inverse() * source_pose_basis
+		).orthonormalized()
+		var target_pose_basis: Basis = (
+			target_rest_basis * source_local_delta
 		).orthonormalized()
 
-		var source_rest_world: Basis = (
-			source_to_world * source_rest_global.basis
-		).orthonormalized()
-
-		# Calculate the animation delta relative to the FBX rest orientation.
-		var source_delta_world: Basis = (
-			source_pose_world * source_rest_world.inverse()
-		).orthonormalized()
-
-		# Express the GLB rest orientation in world coordinates.
-		var target_rest_world: Basis = (
-			target_to_world * target_rest_global.basis
-		).orthonormalized()
-
-		# Apply the FBX animation delta to the GLB rest orientation,
-		# then convert the result back into the GLB skeleton frame.
-		var target_pose_global_basis: Basis = (
-			world_to_target
-			* source_delta_world
-			* target_rest_world
-		).orthonormalized()
-
-		var parent_pose_global_basis: Basis
-
-		if desired_target_global_basis.has(target_parent_index):
-			parent_pose_global_basis = (
-				desired_target_global_basis[target_parent_index]
-			)
-		else:
-			parent_pose_global_basis = (
-				target_skeleton
-				.get_bone_global_rest(target_parent_index)
-				.basis
-				.orthonormalized()
-			)
-
-		# Convert the desired target global rotation into target-local space.
-		var target_pose_local_basis: Basis = (
-			parent_pose_global_basis.inverse()
-			* target_pose_global_basis
-		).orthonormalized()
-
-		# Change rotation only. Preserve the GLB's original bone lengths
-		# and local translation offsets.
+		# Update rotation only; keep Oran's local bone positions/lengths intact.
 		target_skeleton.set_bone_pose_rotation(
 			target_index,
-			target_pose_local_basis.get_rotation_quaternion()
-		)
-
-		desired_target_global_basis[target_index] = (
-			target_pose_global_basis
+			target_pose_basis.get_rotation_quaternion()
 		)
