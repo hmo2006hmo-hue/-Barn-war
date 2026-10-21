@@ -1,8 +1,8 @@
 extends SceneTree
 
 const ExplicitRetargetModifier = preload("res://scripts/explicit_retarget_modifier.gd")
-const SOURCE_FBX := "res://assets/_fbx_audit/Great Sword Slash.fbx"
-const TARGET_GLB := "res://assets/characters/المحارب السومري حامل الرمح.glb"
+const SOURCE_FBX := "res://assets/animations/Great Sword Slash.fbx"
+const TARGET_GLB := "res://assets/characters/اوران .glb"
 const ANGLE_TOLERANCE := 0.035
 const POSITION_TOLERANCE := 0.0001
 
